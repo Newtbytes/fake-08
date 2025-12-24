@@ -1,19 +1,19 @@
 #pragma once
 
-#include <vector>
 #include <string>
+#include <vector>
 using namespace std;
 
-#include "cart.h"
-#include "Input.h"
 #include "Audio.h"
+#include "Input.h"
+#include "cart.h"
 #include "host.h"
 
-//extern "C" {
-  #include <lua.h>
-  #include <lualib.h>
-  #include <lauxlib.h>
-  #include <fix32.h>
+// extern "C" {
+#include <fix32.h>
+#include <lauxlib.h>
+#include <lua.h>
+#include <lualib.h>
 //}
 
 using namespace z8;
@@ -35,8 +35,8 @@ class Vm {
     int _targetFps;
 
     int _picoFrameCount;
-    //bool _hasUpdate;
-    //bool _hasDraw;
+    // bool _hasUpdate;
+    // bool _hasDraw;
 
     bool _cartChangeQueued;
     bool _pauseMenu;
@@ -60,17 +60,13 @@ class Vm {
     void vm_reload(int destaddr, int sourceaddr, int len, Cart* cart);
 
 
-    public:
-    Vm(
-       Host* host,
-       PicoRam* memory = nullptr,
-       Graphics* graphics = nullptr,
-       Input* input = nullptr,
+public:
+    Vm(Host* host, PicoRam* memory = nullptr, Graphics* graphics = nullptr, Input* input = nullptr,
        Audio* audio = nullptr);
     ~Vm();
 
     void LoadBiosCart();
-    
+
     void LoadSettingsCart();
 
     void LoadCart(string filename, bool loadBiosOnFail = true);
@@ -81,7 +77,7 @@ class Vm {
     uint8_t* GetPicoInteralFb();
     uint8_t* GetScreenPaletteMap();
 
-    void FillAudioBuffer(void *audioBuffer, size_t offset, size_t size);
+    void FillAudioBuffer(void* audioBuffer, size_t offset, size_t size);
 
     void CloseCart();
 
@@ -117,6 +113,8 @@ class Vm {
     void vm_poke2(int addr, int16_t value);
     void vm_poke4(int addr, fix32 value);
 
+    lua_State* vm_get_lua_state();
+
     bool vm_cartdata(string key);
     fix32 vm_dget(uint8_t n);
     void vm_dset(uint8_t n, fix32 value);
@@ -136,7 +134,7 @@ class Vm {
 
     void vm_flip();
     void vm_run();
-    void vm_extcmd(string  cmd);
+    void vm_extcmd(string cmd);
 
     void vm_load(string filename, string breadcrumb, string param);
 
@@ -152,22 +150,21 @@ class Vm {
     int getHour();
     int getMinute();
     int getSecond();
-    
-    //settings
+
+    // settings
     int getSetting(string sname);
     void setSetting(string sname, int sval);
-    
+
     void installPackins();
-    
-    //label
+
+    // label
     void loadLabel(string filename, bool mini, int minioffset);
-    
+
     string getLuaLine(string filename, int linenumber);
-    
+
     string getCartBreadcrumb();
     string getCartParam();
 
     size_t serializeLuaState(char* dest);
     void deserializeLuaState(const char* src, size_t len);
 };
-
