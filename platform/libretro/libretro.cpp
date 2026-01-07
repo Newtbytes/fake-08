@@ -322,6 +322,16 @@ EXPORT void retro_run()
    if (enviro_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
       check_variables(false);
 
+   bool audioDisabledForThisFrame = false;
+   bool videoDisabledForThisFrame = false;
+
+   int flags;
+
+   if (enviro_cb(RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE, &flags)) {
+       videoDisabledForThisFrame = !(flags & 1);
+       audioDisabledForThisFrame = !(flags & 2);
+   }
+
     //TODO: improve this so slower hardware can play 30fps games at full speed
     if (_vm->getTargetFps() == 60 || frame % 2 == 0)
     {
@@ -405,104 +415,105 @@ EXPORT void retro_run()
     kHeld = currKHeld;
     kDown = currKDown;
 
-    if (frame % 2 == 0) {
+    if (frame % 2 == 0 && !audioDisabledForThisFrame) {
         _audio->FillAudioBuffer(&audioBuffer, 0, SAMPLESPERFRAME);
         audio_batch_cb(audioBuffer, SAMPLESPERFRAME);
     }
 
+    if (!videoDisabledForThisFrame) {
+        uint8_t* picoFb = _vm->GetPicoInteralFb();
+        uint8_t* screenPaletteMap = _vm->GetScreenPaletteMap();
 
-    uint8_t* picoFb = _vm->GetPicoInteralFb();
-    uint8_t* screenPaletteMap = _vm->GetScreenPaletteMap();
+        drawMode = _memory->drawState.drawMode;
 
-    drawMode = _memory->drawState.drawMode;
+        drawModeScaleX = 1;
+        drawModeScaleY = 1;
+        switch(drawMode){
+            case 1:
+                drawModeScaleX = 2;
+                textureAngle = 0;
+                flip = 0;
+                break;
+            case 2:
+                drawModeScaleY = 2;
+                textureAngle = 0;
+                flip = 0;
+                break;
+            case 3:
+                drawModeScaleX = 2;
+                drawModeScaleY = 2;
+                textureAngle = 0;
+                flip = 0;
+                break;
+            //todo: mirroring
+            //case 4,6,7
+            case 129:
+                textureAngle = 0;
+                flip = 1;
+                break;
+            case 130:
+                textureAngle = 0;
+                flip = 2;
+                break;
+            case 131:
+                textureAngle = 0;
+                flip = 3;
+                break;
+            case 133:
+                textureAngle = 90;
+                flip = 0;
+                break;
+            case 134:
+                textureAngle = 180;
+                flip = 0;
+                break;
+            case 135:
+                textureAngle = 270;
+                flip = 0;
+                break;
+            default:
+                textureAngle = 0;
+                flip = 0;
+                break;
+        }
+        //TODO: handle rotation/flip/mirroring
 
-    drawModeScaleX = 1;
-    drawModeScaleY = 1;
-    switch(drawMode){
-        case 1:
-            drawModeScaleX = 2;
-            textureAngle = 0;
-            flip = 0;
-            break;
-        case 2:
-            drawModeScaleY = 2;
-            textureAngle = 0;
-            flip = 0;
-            break;
-        case 3:
-            drawModeScaleX = 2;
-            drawModeScaleY = 2;
-            textureAngle = 0;
-            flip = 0;
-            break;
-        //todo: mirroring
-        //case 4,6,7
-        case 129:
-            textureAngle = 0;
-            flip = 1;
-            break;
-        case 130:
-            textureAngle = 0;
-            flip = 2;
-            break;
-        case 131:
-            textureAngle = 0;
-            flip = 3;
-            break;
-        case 133:
-            textureAngle = 90;
-            flip = 0;
-            break;
-        case 134:
-            textureAngle = 180;
-            flip = 0;
-            break;
-        case 135:
-            textureAngle = 270;
-            flip = 0;
-            break;
-        default:
-            textureAngle = 0;
-            flip = 0;
-            break;
-    }
-    //TODO: handle rotation/flip/mirroring
+        unsigned width  = PicoScreenWidth;
+        unsigned height = PicoScreenHeight;
+        unsigned pitch  = width * sizeof(uint16_t);
 
-    unsigned width  = PicoScreenWidth;
-    unsigned height = PicoScreenHeight;
-    unsigned pitch  = width * sizeof(uint16_t);
+        width  -= (crop_h_left + crop_h_right);
+        height -= (crop_v_top + crop_v_bottom);
+        pitch  -= (crop_h_left + crop_h_right) * sizeof(uint16_t);
 
-    width  -= (crop_h_left + crop_h_right);
-    height -= (crop_v_top + crop_v_bottom);
-    pitch  -= (crop_h_left + crop_h_right) * sizeof(uint16_t);
-
-    if (scale > 1) {
-        for(unsigned scry = 0; scry < height; scry++) {
-            for (unsigned scrx = 0; scrx < width; scrx++) {
-                int picox = (scrx + crop_h_left) / drawModeScaleX;
-                int picoy = (scry + crop_v_top) / drawModeScaleY;
-                uint16_t color = _rgb565Colors[screenPaletteMap[getPixelNibble(picox, picoy, picoFb)] & 0x8f];
-                
-                for (int y = 0; y < scale; y++) {
-                    for (int x = 0; x < scale; x++) {
-                        screenBuffer2x[(scry*scale+y)*width*scale+scrx*scale+x] = color;
+        if (scale > 1) {
+            for(unsigned scry = 0; scry < height; scry++) {
+                for (unsigned scrx = 0; scrx < width; scrx++) {
+                    int picox = (scrx + crop_h_left) / drawModeScaleX;
+                    int picoy = (scry + crop_v_top) / drawModeScaleY;
+                    uint16_t color = _rgb565Colors[screenPaletteMap[getPixelNibble(picox, picoy, picoFb)] & 0x8f];
+                    
+                    for (int y = 0; y < scale; y++) {
+                        for (int x = 0; x < scale; x++) {
+                            screenBuffer2x[(scry*scale+y)*width*scale+scrx*scale+x] = color;
+                        }
                     }
                 }
             }
-        }
 
-        video_cb(&screenBuffer2x, width * scale, height * scale, pitch * scale);
-    }
-    else {
-        for(unsigned scry = 0; scry < height; scry++) {
-            for (unsigned scrx = 0; scrx < width; scrx++) {
-                int picox = (scrx + crop_h_left) / drawModeScaleX;
-                int picoy = (scry + crop_v_top) / drawModeScaleY;
-                screenBuffer[scry*width+scrx] = _rgb565Colors[screenPaletteMap[getPixelNibble(picox, picoy, picoFb)] & 0x8f];
+            video_cb(&screenBuffer2x, width * scale, height * scale, pitch * scale);
+        }
+        else {
+            for(unsigned scry = 0; scry < height; scry++) {
+                for (unsigned scrx = 0; scrx < width; scrx++) {
+                    int picox = (scrx + crop_h_left) / drawModeScaleX;
+                    int picoy = (scry + crop_v_top) / drawModeScaleY;
+                    screenBuffer[scry*width+scrx] = _rgb565Colors[screenPaletteMap[getPixelNibble(picox, picoy, picoFb)] & 0x8f];
+                }
             }
-        }
 
-        video_cb(&screenBuffer, width, height, pitch);
+            video_cb(&screenBuffer, width, height, pitch);
+        }
     }
 
     frame++;
