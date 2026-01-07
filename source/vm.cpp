@@ -1019,6 +1019,10 @@ void Vm::vm_poke4(int addr, fix32 value){
     _memory->data[addr + 3] = (uint8_t)(ubits >> 24);
 }
 
+lua_State* Vm::vm_get_lua_state() {
+    return _luaState;
+}
+
 bool Vm::vm_cartdata(string key) {
     //match pico 8 errors
     if (key.length() == 0 || key.length() > 64) {
