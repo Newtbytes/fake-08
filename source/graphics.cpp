@@ -33,17 +33,34 @@ Graphics::Graphics(std::string fontdata, PicoRam* memory) {
 	color();
 }
 
-
+// Upper memory mapping: 0x80->0x8000, 0xA0->0xA000, 0xC0->0xC000, 0xE0->0xE000
+// Mapping values are in 256-byte increments, userData starts at 0x8000
+// offset = (mapping << 8) - 0x8000 = (mapping - 0x80) << 8
 uint8_t* Graphics::GetP8FrameBuffer(){
-	return _memory->hwState.screenDataMemMapping == 0 
-		? _memory->spriteSheetData 
-		: _memory->screenBuffer;
+	uint8_t mapping = _memory->hwState.screenDataMemMapping;
+	if (mapping == 0) {
+		return _memory->spriteSheetData;
+	} else if (mapping == 0x60) {
+		return _memory->screenBuffer;
+	} else if (mapping >= 0x80) {
+		
+		int offset = (mapping - 0x80) << 8;
+		return _memory->userData + offset;
+	}
+	return _memory->screenBuffer;
 }
 
 uint8_t* Graphics::GetP8SpriteSheetBuffer(){
-	return _memory->hwState.spriteSheetMemMapping == 0x60
-		? _memory->screenBuffer 
-		: _memory->spriteSheetData;
+	uint8_t mapping = _memory->hwState.spriteSheetMemMapping;
+	if (mapping == 0) {
+		return _memory->spriteSheetData;
+	} else if (mapping == 0x60) {
+		return _memory->screenBuffer;
+	} else if (mapping >= 0x80) {
+		int offset = (mapping - 0x80) << 8;
+		return _memory->userData + offset;
+	}
+	return _memory->spriteSheetData;
 }
 
 uint8_t* Graphics::GetScreenPaletteMap(){
@@ -138,12 +155,13 @@ void Graphics::copySpriteToScreen(
 			//			? bothPix & 0x0f //just first 4 bits
 			//			: bothPix >> 4;  //just last 4 bits
 			uint8_t lc = bothPix & 0x0f;
-			uint8_t rc = bothPix >> 4;
+			uint8_t rc = (bothPix >> 4) & 0x0f;
 			
 			const int finaly = scr_y + y;
 			int finalx = scr_x + (flip_x ? x + 1 : x);
 			
 			if (x > 0 || !startWithHalf){
+				lc &= 0x0f; // Ensure color is only 4 bits before palette lookup
 				if (!(drawState.drawPaletteMap[lc] >> 4)){
 					lc = drawState.drawPaletteMap[lc] & 0x0f;
 
@@ -171,6 +189,7 @@ void Graphics::copySpriteToScreen(
 			}
 
 			if (x < scr_w) {
+				rc &= 0x0f; // Ensure color is only 4 bits before palette lookup
 				if (!(drawState.drawPaletteMap[rc] >> 4)){
 					rc = drawState.drawPaletteMap[rc] & 0x0f;
 
@@ -330,7 +349,8 @@ void Graphics::copyStretchSpriteToScreen(
 
 					uint8_t c = shiftedPixIndex % 2 == 0 
 						? bothPix & 0x0f //just first 4 bits
-						: bothPix >> 4;  //just last 4 bits
+						: (bothPix >> 4) & 0x0f;  //just last 4 bits
+					c &= 0x0f; // Ensure color is only 4 bits before palette lookup
 
 					if (_memory->drawState.drawPaletteMap[c] >> 4){
 						continue;
@@ -380,7 +400,8 @@ void Graphics::copyStretchSpriteToScreen(
 
 					uint8_t c = shiftedPixIndex % 2 == 0 
 						? bothPix & 0x0f //just first 4 bits
-						: bothPix >> 4;  //just last 4 bits
+						: (bothPix >> 4) & 0x0f;  //just last 4 bits
+					c &= 0x0f; // Ensure color is only 4 bits before palette lookup
 
 					if (_memory->drawState.drawPaletteMap[c] >> 4){
 						continue;
@@ -985,7 +1006,75 @@ void Graphics::circfill(int ox, int oy, int r){
 	this->circfill(ox, oy, r, _memory->drawState.color);
 }
 
+void Graphics::_invertedCircfill(int ox, int oy, int r, uint8_t col){
+	color(col);
+
+	applyCameraToPoint(&ox, &oy);
+
+	int clipLeft = _memory->drawState.clip_xb;
+	int clipRight = _memory->drawState.clip_xe;
+	int clipTop = _memory->drawState.clip_yb;
+	int clipBottom = _memory->drawState.clip_ye;
+
+	int circleTop = oy - r;
+	int circleBottom = oy + r;
+
+	// Fill rows above the circle
+	for (int row = clipTop; row < circleTop && row < clipBottom; row++) {
+		_private_h_line(clipLeft, clipRight - 1, row);
+	}
+
+	// Fill rows that intersect the circle (left and right of circle)
+	if (r >= 0) {
+		int x = -r, y = 0, err = 2 - 2 * r;
+		int lastY = -1;
+		do {
+			// For each y offset, draw lines outside the circle
+			if (oy + y != lastY) {
+				// Right side of screen (to the right of circle)
+				if (ox + x + 1 < clipRight) {
+					_private_h_line(ox - x + 1, clipRight - 1, oy + y);
+				}
+				// Left side of screen (to the left of circle)
+				if (ox + x - 1 >= clipLeft) {
+					_private_h_line(clipLeft, ox + x - 1, oy + y);
+				}
+			}
+			if (y > 0 && oy - y != lastY) {
+				// Right side of screen (to the right of circle)
+				if (ox + x + 1 < clipRight) {
+					_private_h_line(ox - x + 1, clipRight - 1, oy - y);
+				}
+				// Left side of screen (to the left of circle)
+				if (ox + x - 1 >= clipLeft) {
+					_private_h_line(clipLeft, ox + x - 1, oy - y);
+				}
+			}
+			lastY = oy + y;
+			int savedR = r;
+			r = err;
+			if (r > x)
+				err += ++x * 2 + 1;
+			if (r <= y)
+				err += ++y * 2 + 1;
+			r = savedR;
+		} while (x < 0);
+	}
+
+	// Fill rows below the circle
+	for (int row = circleBottom + 1; row < clipBottom; row++) {
+		_private_h_line(clipLeft, clipRight - 1, row);
+	}
+}
+
 void Graphics::circfill(int ox, int oy, int r, uint8_t col){
+	// Check if inverted fill mode is enabled (bit 1 of colorSettingFlag at 0x5f34)
+	bool invertedFill = (_memory->drawState.colorSettingFlag & 0x02) != 0;
+
+	if (invertedFill) {
+		return _invertedCircfill(ox, oy, r, col);
+	}
+
 	color(col);
 
 	applyCameraToPoint(&ox, &oy);
@@ -1823,7 +1912,14 @@ void Graphics::pal() {
 void Graphics::pal(uint8_t p) {
 	for (uint8_t c = 0; c < 16; c++) {
 		if (p == 0) {
-			_memory->drawState.drawPaletteMap[c] = c;
+			// Preserve transparency bit when resetting palette mapping
+			// But ensure color 0 is transparent by default if it wasn't set
+			uint8_t transparencyBit = _memory->drawState.drawPaletteMap[c] & 0x10;
+			if (c == 0 && transparencyBit == 0) {
+				// Color 0 should be transparent by default
+				transparencyBit = 0x10;
+			}
+			_memory->drawState.drawPaletteMap[c] = c | transparencyBit;
 		} else if (p == 1) {
 			_memory->drawState.screenPaletteMap[c] = c;
 		}

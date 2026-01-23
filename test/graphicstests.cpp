@@ -459,6 +459,29 @@ TEST_CASE("graphics class behaves as expected") {
 
         checkPoints(graphics, expectedPoints);
     }
+    SUBCASE("circfill({ox}, {oy}, {r}, {c}) with inverted mode fills outside circle") {
+        graphics->cls(8);
+        picoRam.drawState.colorSettingFlag = 0x02; // Enable inverted fill mode 
+        graphics->circfill(40, 40, 2, 13);
+        std::vector<coloredPoint> expectedPoints = {
+            // Inside circle should be background color (8)
+            {40, 40, 8}, 
+            {39, 40, 8},
+            {40, 39, 8},
+            {41, 40, 8},
+            {40, 41, 8},
+            // Outside circle should be filled color (13)
+            {40, 37, 13},
+            {40, 43, 13},
+            {37, 40, 13},
+            {43, 40, 13},
+            
+            {0, 0, 13},
+            {127, 127, 13},
+        };
+
+        checkPoints(graphics, expectedPoints);
+    }
     SUBCASE("oval({x0}, {x1}, {y0}, {y1}, {c}) draws an ellipse") {
         graphics->cls();
         graphics->oval(40, 40, 45, 42, 13);
@@ -2708,6 +2731,104 @@ TEST_CASE("graphics class behaves as expected") {
         };
 
         checkPoints(graphics, expectedPoints);
+    }
+    SUBCASE("Memory mapping for sprite sheet buffer") {
+        picoRam.hwState.spriteSheetMemMapping = 0x00;
+        uint8_t* buffer = graphics->GetP8SpriteSheetBuffer();
+        CHECK_EQ(buffer, picoRam.spriteSheetData);
+
+        picoRam.hwState.spriteSheetMemMapping = 0x60;
+        buffer = graphics->GetP8SpriteSheetBuffer();
+        CHECK_EQ(buffer, picoRam.screenBuffer);
+
+        picoRam.hwState.spriteSheetMemMapping = 0x80;
+        buffer = graphics->GetP8SpriteSheetBuffer();
+        CHECK_EQ(buffer, picoRam.userData);
+
+        picoRam.hwState.spriteSheetMemMapping = 0xA0;
+        buffer = graphics->GetP8SpriteSheetBuffer();
+        CHECK_EQ(buffer, picoRam.userData + 0x2000);
+
+        picoRam.hwState.spriteSheetMemMapping = 0xC0;
+        buffer = graphics->GetP8SpriteSheetBuffer();
+        CHECK_EQ(buffer, picoRam.userData + 0x4000);
+
+        picoRam.hwState.spriteSheetMemMapping = 0xE0;
+        buffer = graphics->GetP8SpriteSheetBuffer();
+        CHECK_EQ(buffer, picoRam.userData + 0x6000);
+    }
+    SUBCASE("Memory mapping for frame buffer") {
+        picoRam.hwState.screenDataMemMapping = 0x00;
+        uint8_t* buffer = graphics->GetP8FrameBuffer();
+        CHECK_EQ(buffer, picoRam.spriteSheetData);
+
+        picoRam.hwState.screenDataMemMapping = 0x60;
+        buffer = graphics->GetP8FrameBuffer();
+        CHECK_EQ(buffer, picoRam.screenBuffer);
+
+        picoRam.hwState.screenDataMemMapping = 0x80;
+        buffer = graphics->GetP8FrameBuffer();
+        CHECK_EQ(buffer, picoRam.userData);
+
+        picoRam.hwState.screenDataMemMapping = 0xA0;
+        buffer = graphics->GetP8FrameBuffer();
+        CHECK_EQ(buffer, picoRam.userData + 0x2000);
+
+        picoRam.hwState.screenDataMemMapping = 0xC0;
+        buffer = graphics->GetP8FrameBuffer();
+        CHECK_EQ(buffer, picoRam.userData + 0x4000);
+
+        picoRam.hwState.screenDataMemMapping = 0xE0;
+        buffer = graphics->GetP8FrameBuffer();
+        CHECK_EQ(buffer, picoRam.userData + 0x6000);
+    }
+    SUBCASE("Sprite rendering with upper memory mapping") {
+        picoRam.hwState.spriteSheetMemMapping = 0xC0;
+        
+        uint8_t* spriteBuffer = graphics->GetP8SpriteSheetBuffer();
+        
+        for (int y = 0; y < 8; y++) {
+            for (int byteX = 0; byteX < 4; byteX++) { // 4 bytes = 8 pixels wide
+                int byteIdx = y * 64 + byteX; // 64 bytes per row
+                spriteBuffer[byteIdx] = 0x55; // Pattern: 5,5 (both pixels are color 5)
+            }
+        }
+        
+        graphics->cls();
+        graphics->spr(0, 10, 10, 1.0, 1.0, false, false);
+        
+        CHECK_EQ(graphics->pget(10, 10), 5); // top-left should be color 5
+        CHECK_EQ(graphics->pget(11, 10), 5); // next pixel should be color 5
+        CHECK_EQ(graphics->pget(10, 11), 5); // below should be color 5
+        CHECK_EQ(graphics->pget(17, 17), 5); // bottom-right should be color 5
+    }
+    SUBCASE("Sprite transparency with upper memory mapping") {
+        //map sprite sheet to upper memory
+        picoRam.hwState.spriteSheetMemMapping = 0xC0;
+        
+        graphics->palt();
+        
+        //create a sprite with alternating pixels
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                //left pixel is opaque (5), right pixel is transparent (0)
+                uint8_t color = x % 2 == 0 ? 5 : 0;
+                graphics->sset(x, y, color);
+            }
+        }
+        
+        graphics->cls(2);
+        graphics->spr(0, 10, 10, 1.0, 1.0, false, false);
+        
+        // Even X positions should be opaque (color 5)
+        CHECK_EQ(graphics->pget(10, 10), 5);
+        CHECK_EQ(graphics->pget(12, 10), 5);
+        CHECK_EQ(graphics->pget(14, 10), 5);
+        
+        // Odd X positions should be background color (color 2)
+        CHECK_EQ(graphics->pget(11, 10), 2);
+        CHECK_EQ(graphics->pget(13, 10), 2);
+        CHECK_EQ(graphics->pget(15, 10), 2);
     }
 
 
